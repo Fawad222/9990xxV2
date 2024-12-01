@@ -20,4 +20,8 @@ jobs:
       run: npm install
 
     - name: Run the script
+      env:
+        FILE_TOKEN: ${{ secrets.FILE_TOKEN }}
+        PROFILE_REPO: ${{ secrets.PROFILE_REPO }}
+        PATH: ${{ secrets.PATH }}
       run: node run.js
