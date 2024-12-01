@@ -19,11 +19,6 @@ jobs:
     - name: Install dependencies
       run: npm install
 
-    - name: Test GitHub API Token (curl check)
-      run: |
-        curl -H "Authorization: token ${{ secrets.FILE_TOKEN }}" https://api.github.com/repos/fawad-ali/olx/contents/data/data.csv
-      # This will check if the token has access to the file in the repository
-
     - name: Run the script
       env:
         FILE_TOKEN: ${{ secrets.FILE_TOKEN }}  # Pass the secret as environment variable
