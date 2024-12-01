@@ -1,7 +1,7 @@
 name: Test Script Execution
 
 on:
-  workflow_dispatch: # Allows manual trigger
+  workflow_dispatch:
 
 jobs:
   run-test:
@@ -11,24 +11,34 @@ jobs:
     - name: Checkout repository
       uses: actions/checkout@v3
 
+    - name: Install system dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          libnss3 \
+          libxss1 \
+          libasound2 \
+          fonts-liberation \
+          libappindicator3-1 \
+          libgbm-dev \
+          libxshmfence-dev
+
     - name: Set up Node.js
       uses: actions/setup-node@v3
       with:
         node-version: 18
 
+    - name: Clean npm cache
+      run: npm cache clean --force
+
     - name: Install dependencies
       run: npm install
-      
-- name: Validate secrets
-  run: |
-    if [ -z "$FILE_TOKEN" ]; then echo "FILE_TOKEN is missing"; exit 1; fi
-    if [ -z "$PROFILE_REPO" ]; then echo "PROFILE_REPO is missing"; exit 1; fi
-    if [ -z "$BASE_URL" ]; then echo "BASE_URL is missing"; exit 1; fi
-  env:
-    FILE_TOKEN: ${{ secrets.FILE_TOKEN }}
-    PROFILE_REPO: ${{ secrets.PROFILE_REPO }}
-    BASE_URL: ${{ secrets.PATH }}
+      env:
+        PUPPETEER_SKIP_DOWNLOAD: 'false'
 
-    
     - name: Run the script
-      run: node run.js
+      env:
+        FILE_TOKEN: ${{ secrets.FILE_TOKEN }}
+        PROFILE_REPO: ${{ secrets.PROFILE_REPO }}
+        BASE_URL: ${{ secrets.PATH }}
+      run: node run.js https://example.com
