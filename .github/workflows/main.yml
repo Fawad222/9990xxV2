@@ -15,13 +15,12 @@ jobs:
       uses: actions/setup-node@v3
       with:
         node-version: 18
+    - name: Install sh
+      run: sudo apt-get install -y bash
 
     - name: Install dependencies
       run: npm install
     
-    - name: Install sh
-      run: sudo apt-get install -y bash
-
 
     - name: Validate secrets
       run: |
