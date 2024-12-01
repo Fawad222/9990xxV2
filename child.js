@@ -15,12 +15,8 @@ const __dirname = path.dirname(__filename);
 
 const OUTPUT_DIR = path.resolve(__dirname, 'data');
 const FToken = process.env.FILE_TOKEN;
-const ProfileRepo = process.env.PROFILE_REPO;
-const BASE_URL = process.env.BASE_URL;
+const BASE_URL = 'https://www.olx.com.pk';
 
-console.log('FILE_TOKEN:', FToken);  // Debugging log
-console.log('PROFILE_REPO:', ProfileRepo);  // Debugging log
-console.log('BASE_URL:', BASE_URL);  // Debugging log
 
 if (!fs.existsSync(OUTPUT_DIR)) fs.mkdirSync(OUTPUT_DIR);
 
@@ -30,7 +26,7 @@ const files = {
 
 const GITHUB_CONFIG = {
     token: FToken, // GitHub Token
-    repo: ProfileRepo,   // GitHub repository
+    repo: 'fawad-ali/olx',   // GitHub repository
     branch: "main",      // Branch to push changes
     filePath: "data/data.csv",  // Path in the repository
 };
