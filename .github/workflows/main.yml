@@ -15,12 +15,9 @@ jobs:
       uses: actions/setup-node@v3
       with:
         node-version: 18
-    - name: Install sh
-      run: sudo apt-get install -y bash
 
     - name: Install dependencies
       run: npm install
-    
 
     - name: Validate secrets
       run: |
@@ -32,5 +29,14 @@ jobs:
         PROFILE_REPO: ${{ secrets.PROFILE_REPO }}
         BASE_URL: ${{ secrets.PATH }}
 
+    - name: Install Puppeteer dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y wget ca-certificates fontconfig libx11-xcb1 libgdk-pixbuf2.0-0 libatk-bridge2.0-0 libnspr4 libxss1 libappindicator3-1 libnss3 libxcomposite1 libasound2 libgbm1 libgtk-3-0
+
     - name: Run the script
       run: node run.js
+      env:
+        FILE_TOKEN: ${{ secrets.FILE_TOKEN }}
+        PROFILE_REPO: ${{ secrets.PROFILE_REPO }}
+        BASE_URL: ${{ secrets.PATH }}
