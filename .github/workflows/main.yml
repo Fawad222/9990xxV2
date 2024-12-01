@@ -18,15 +18,17 @@ jobs:
 
     - name: Install dependencies
       run: npm install
-    - name: Debug secrets
-    run: |
-      echo "FILE_TOKEN: $FILE_TOKEN"
-      echo "PROFILE_REPO: $PROFILE_REPO"
-      echo "BASE_URL: $BASE_URL"
-    env:
-      FILE_TOKEN: ${{ secrets.FILE_TOKEN }}
-      PROFILE_REPO: ${{ secrets.PROFILE_REPO }}
-      BASE_URL: ${{ secrets.PATH }}
+      
+- name: Validate secrets
+  run: |
+    if [ -z "$FILE_TOKEN" ]; then echo "FILE_TOKEN is missing"; exit 1; fi
+    if [ -z "$PROFILE_REPO" ]; then echo "PROFILE_REPO is missing"; exit 1; fi
+    if [ -z "$BASE_URL" ]; then echo "BASE_URL is missing"; exit 1; fi
+  env:
+    FILE_TOKEN: ${{ secrets.FILE_TOKEN }}
+    PROFILE_REPO: ${{ secrets.PROFILE_REPO }}
+    BASE_URL: ${{ secrets.PATH }}
 
+    
     - name: Run the script
       run: node run.js
