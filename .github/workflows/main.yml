@@ -19,21 +19,6 @@ jobs:
     - name: Install dependencies
       run: npm install
 
-    - name: Validate secrets
-      run: |
-        if [ -z "$FILE_TOKEN" ]; then echo "FILE_TOKEN is missing"; exit 1; fi
-        if [ -z "$PROFILE_REPO" ]; then echo "PROFILE_REPO is missing"; exit 1; fi
-        if [ -z "$BASE_URL" ]; then echo "BASE_URL is missing"; exit 1; fi
-      env:
-        FILE_TOKEN: ${{ secrets.FILE_TOKEN }}
-        PROFILE_REPO: ${{ secrets.PROFILE_REPO }}
-        BASE_URL: ${{ secrets.PATH }}
-
-    - name: Install Puppeteer dependencies
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y wget ca-certificates fontconfig libx11-xcb1 libgdk-pixbuf2.0-0 libatk-bridge2.0-0 libnspr4 libxss1 libappindicator3-1 libnss3 libxcomposite1 libasound2 libgbm1 libgtk-3-0
-
     - name: Run the script
       run: node run.js
       env:
