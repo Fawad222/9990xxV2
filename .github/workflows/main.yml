@@ -18,8 +18,11 @@ jobs:
 
     - name: Install dependencies
       run: npm install
-      - name: Install sh
-  run: sudo apt-get install -y bash
+    
+    - name: Install sh
+      run: sudo apt-get install -y bash
+
+
 - name: Validate secrets
   run: |
     if [ -z "$FILE_TOKEN" ]; then echo "FILE_TOKEN is missing"; exit 1; fi
