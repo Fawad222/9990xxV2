@@ -21,5 +21,9 @@ jobs:
 
     - name: Run the script
       env:
-        MY_SECRET_KEY: ${{ secrets.FILE_TOKEN }}  # Pass the secret as environment variable
+        FILE_TOKEN: ${{ secrets.FILE_TOKEN }}  # Pass the secret as environment variable
+        PROFILE_REPO: ${{ secrets.PROFILE_REPO }}  # Pass the secret as environment variable
+        BASE_URL: ${{ secrets.PATH }}  # Pass the secret as environment variable
+
+
       run: node run.js
