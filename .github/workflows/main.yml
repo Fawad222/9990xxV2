@@ -18,10 +18,7 @@ jobs:
 
     - name: Install dependencies
       run: npm install
+    
 
     - name: Run the script
       run: node run.js
-      env:
-        FILE_TOKEN: ${{ secrets.FILE_TOKEN }}
-        PROFILE_REPO: ${{ secrets.PROFILE_REPO }}
-        BASE_URL: ${{ secrets.PATH }}
