@@ -22,4 +22,6 @@ jobs:
       run: npm install
 
     - name: Run the script
+      env:
+        FILE_TOKEN: ${{ secrets.FILE_TOKEN }}  # Pass the secret as environment variable
       run: node olx.js
