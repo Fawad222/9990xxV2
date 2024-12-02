@@ -11,9 +11,6 @@ const CITIES = [
     'punjab_g2003006',
     'islamabad-capital-territory_g2003003',
     'khyber-pakhtunkhwa_g2003005',
-    'balochistan_g2003001',
-    'azad-kashmir_g2003000',
-    'sindh_g2003007'
 ];
 
 const MIN_DELAY_MS = 5000;
@@ -84,7 +81,7 @@ const scrapeParentPages = async () => {
         for (; currentBodyType <= 11; currentBodyType++) {
             console.log(chalk.cyan(`Scraping body type: ${currentBodyType} for city: ${city}`));
 
-            for (; currentPage <= 1; currentPage++) {
+            for (; currentPage <= 2; currentPage++) {
                 const url = constructUrl(city, currentBodyType, currentPage);
                 console.log(chalk.yellow(`Crawling URL: ${url}`));
 
