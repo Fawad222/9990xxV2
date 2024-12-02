@@ -81,7 +81,7 @@ const scrapeParentPages = async () => {
         for (; currentBodyType <= 11; currentBodyType++) {
             console.log(chalk.cyan(`Scraping body type: ${currentBodyType} for city: ${city}`));
 
-            for (; currentPage <= 2; currentPage++) {
+            for (; currentPage <= 3; currentPage++) {
                 const url = constructUrl(city, currentBodyType, currentPage);
                 console.log(chalk.yellow(`Crawling URL: ${url}`));
 
