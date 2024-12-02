@@ -6,7 +6,7 @@ on:
   workflow_dispatch: # Allows manual trigger
 
 jobs:
-  run-script:
+  run-test:
     runs-on: ubuntu-latest
 
     steps:
@@ -24,4 +24,4 @@ jobs:
     - name: Run the script
       env:
         FILE_TOKEN: ${{ secrets.FILE_TOKEN }}  # Pass the secret as environment variable
-      run: node olx.js
+      run: node run.js
