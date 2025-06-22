@@ -1,0 +1,1 @@
+Error: there is phone number coming in script the issue id i guess with olx as it gives a error page, make sure the link browser opened i an not error page, if not then refresh the page once again and them scrap the phone number
