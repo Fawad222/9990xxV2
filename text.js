@@ -4,14 +4,53 @@ import chalk from 'chalk';
 
 export const scrapeListing = async (url) => {
     try {
-        // Fetch the page content
-        const { data } = await axios.get(url, { headers: { 'User-Agent': 'Mozilla/5.0' } });
+        console.log(chalk.cyan(`Scraping URL: ${url}`));
+
+        // Fetch the page content with retries to ensure full load
+        let data;
+        let attempts = 0;
+        const maxAttempts = 3;
+        while (attempts < maxAttempts) {
+            try {
+                const response = await axios.get(url, { headers: { 'User-Agent': 'Mozilla/5.0' } });
+                data = response.data;
+                if (data && data.length > 0) break;
+            } catch (fetchErr) {
+                console.error(chalk.red(`Attempt ${attempts + 1} failed for ${url}: ${fetchErr.message}`));
+            }
+            attempts++;
+            // Wait before retrying
+            await new Promise(res => setTimeout(res, 2000));
+        }
+
+        if (!data || data.length === 0) {
+            console.error(chalk.red(`Failed to fetch page content after ${maxAttempts} attempts for ${url}`));
+            return null;
+        }
+
         const $ = cheerio.load(data);
 
-        // Select the script tag containing the data
-        const scriptContent = $("#body-wrapper + script").html();
+        // Wait until the script tag is present by checking multiple selectors and fallback
+        let scriptContent = $("#body-wrapper + script").html();
+
+        // If not found, try other likely script tags (useful if markup changes)
         if (!scriptContent) {
-            console.error(chalk.red("Script tag not found or empty."));
+            // Try all script tags and see which one contains "window.__PRELOADED_STATE__"
+            $('script').each((i, el) => {
+                const html = $(el).html();
+                if (html && html.includes('window.__PRELOADED_STATE__')) {
+                    scriptContent = html;
+                }
+            });
+        }
+
+        // Additional fallback: try the very last script tag
+        if (!scriptContent) {
+            scriptContent = $('script').last().html();
+        }
+
+        if (!scriptContent) {
+            console.error(chalk.red(`Script tag not found or empty for URL: ${url}`));
             return null;
         }
 
