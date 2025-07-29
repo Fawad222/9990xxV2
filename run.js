@@ -16,6 +16,7 @@ const CITIES = [
 const MIN_DELAY_MS = 5000;
 const MAX_DELAY_MS = 8000;
 const STATE_FILE_PATH = path.join(__dirname, 'state.json');
+const MAX_RETRIES = 5; // Maximum retries for each page
 
 const randomDelay = () =>
     new Promise((resolve) => setTimeout(resolve, MIN_DELAY_MS + Math.random() * (MAX_DELAY_MS - MIN_DELAY_MS)));
@@ -64,6 +65,44 @@ let cityIndex = 0;
 let currentBodyType = 1;
 let currentPage = 1;
 
+// Retry logic for scraping a page until content is loaded or max retries reached
+const scrapePageWithRetries = async (url) => {
+    for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+        console.log(chalk.yellow(`Crawling URL [Attempt ${attempt}]: ${url}`));
+        const child = fork(path.join(__dirname, 'child.js'), [url]);
+
+        try {
+            await new Promise((resolve, reject) => {
+                child.on('message', (message) => {
+                    if (message && message.success) {
+                        resolve();
+                    } else {
+                        reject(new Error(`Child process failed for ${url}`));
+                    }
+                });
+
+                child.on('exit', (code) => {
+                    if (code !== 0) {
+                        console.error(chalk.red(`Child process failed with code ${code}.`));
+                        reject(new Error(`Child process failed with code ${code}`));
+                    }
+                });
+            });
+            // Success, break out of retry loop
+            return true;
+        } catch (error) {
+            console.error(chalk.red(`Error: ${error.message}`));
+            if (attempt === MAX_RETRIES) {
+                console.error(chalk.red(`Max retries reached for ${url}. Moving on...`));
+                return false;
+            }
+            // Wait a bit before refreshing/trying again
+            await randomDelay();
+        }
+    }
+    return false;
+};
+
 const scrapeParentPages = async () => {
     const lastState = loadState();
 
@@ -83,31 +122,11 @@ const scrapeParentPages = async () => {
 
             for (; currentPage <= 3; currentPage++) {
                 const url = constructUrl(city, currentBodyType, currentPage);
-                console.log(chalk.yellow(`Crawling URL: ${url}`));
 
-                const child = fork(path.join(__dirname, 'child.js'), [url]);
-
-                try {
-                    await new Promise((resolve, reject) => {
-                        child.on('message', (message) => {
-                            if (message && message.success) {
-                                resolve();
-                            } else {
-                                reject(new Error(`Child process failed for ${url}`));
-                            }
-                        });
-
-                        child.on('exit', (code) => {
-                            if (code !== 0) {
-                                console.error(chalk.red(`Child process failed with code ${code}.`));
-                                reject(new Error(`Child process failed with code ${code}`));
-                            }
-                        });
-                    });
-                } catch (error) {
-                    console.error(chalk.red(`Error: ${error.message}`));
+                const success = await scrapePageWithRetries(url);
+                if (!success) {
+                    // Save state and continue to next page
                     saveState({ cityIndex, bodyType: currentBodyType, page: currentPage });
-                    // Continue instead of stopping the process
                     continue;
                 }
 
