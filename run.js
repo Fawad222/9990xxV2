@@ -1,8 +1,11 @@
-import { fork } from 'child_process';
 import { fileURLToPath } from 'url';
 import path from 'path';
 import chalk from 'chalk';
 import fs from 'fs';
+import puppeteer from 'puppeteer-extra';
+import StealthPlugin from 'puppeteer-extra-plugin-stealth';
+
+puppeteer.use(StealthPlugin());
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -16,19 +19,10 @@ const CITIES = [
 const MIN_DELAY_MS = 5000;
 const MAX_DELAY_MS = 8000;
 const STATE_FILE_PATH = path.join(__dirname, 'state.json');
-const MAX_RETRIES = 5; // Maximum retries for each page
+const MAX_RETRIES = 5;
 
 const randomDelay = () =>
     new Promise((resolve) => setTimeout(resolve, MIN_DELAY_MS + Math.random() * (MAX_DELAY_MS - MIN_DELAY_MS)));
-
-const getMemoryUsage = () => {
-    const used = process.memoryUsage();
-    return {
-        rss: `${(used.rss / 1024 / 1024).toFixed(2)} MB`,
-        heapUsed: `${(used.heapUsed / 1024 / 1024).toFixed(2)} MB`,
-        heapTotal: `${(used.heapTotal / 1024 / 1024).toFixed(2)} MB`,
-    };
-};
 
 const constructUrl = (city, bodyType, page) => {
     return `https://www.olx.com.pk/${city}/vehicles_c5?page=${page}&sorting=desc-creation&filter=body_type_eq_${bodyType}`;
@@ -65,44 +59,6 @@ let cityIndex = 0;
 let currentBodyType = 1;
 let currentPage = 1;
 
-// Retry logic for scraping a page until content is loaded or max retries reached
-const scrapePageWithRetries = async (url) => {
-    for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
-        console.log(chalk.yellow(`Crawling URL [Attempt ${attempt}]: ${url}`));
-        const child = fork(path.join(__dirname, 'child.js'), [url]);
-
-        try {
-            await new Promise((resolve, reject) => {
-                child.on('message', (message) => {
-                    if (message && message.success) {
-                        resolve();
-                    } else {
-                        reject(new Error(`Child process failed for ${url}`));
-                    }
-                });
-
-                child.on('exit', (code) => {
-                    if (code !== 0) {
-                        console.error(chalk.red(`Child process failed with code ${code}.`));
-                        reject(new Error(`Child process failed with code ${code}`));
-                    }
-                });
-            });
-            // Success, break out of retry loop
-            return true;
-        } catch (error) {
-            console.error(chalk.red(`Error: ${error.message}`));
-            if (attempt === MAX_RETRIES) {
-                console.error(chalk.red(`Max retries reached for ${url}. Moving on...`));
-                return false;
-            }
-            // Wait a bit before refreshing/trying again
-            await randomDelay();
-        }
-    }
-    return false;
-};
-
 const scrapeParentPages = async () => {
     const lastState = loadState();
 
@@ -123,18 +79,48 @@ const scrapeParentPages = async () => {
             for (; currentPage <= 3; currentPage++) {
                 const url = constructUrl(city, currentBodyType, currentPage);
 
-                const success = await scrapePageWithRetries(url);
-                if (!success) {
-                    // Save state and continue to next page
-                    saveState({ cityIndex, bodyType: currentBodyType, page: currentPage });
-                    continue;
+                let childUrls = [];
+                let browser;
+                for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+                    try {
+                        browser = await puppeteer.launch({
+                            headless: true,
+                            args: [
+                                '--no-sandbox',
+                                '--disable-setuid-sandbox',
+                                '--disable-blink-features=AutomationControlled',
+                            ],
+                        });
+                        const page = await browser.newPage();
+                        await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36');
+                        await page.goto(url, { waitUntil: 'networkidle2', timeout: 60000 });
+                        await page.waitForSelector('a[data-testid="listing-ad-link"]', { timeout: 20000 });
+
+                        childUrls = await page.evaluate(() => {
+                            return Array.from(document.querySelectorAll('a[data-testid="listing-ad-link"]')).map(a => a.href);
+                        });
+
+                        console.log(chalk.yellow(`Found ${childUrls.length} child pages on ${url}`));
+                        childUrls.forEach((childUrl, idx) => {
+                            console.log(`[Child ${idx + 1}] ${childUrl}`);
+                        });
+
+                        await browser.close();
+                        break; // success
+                    } catch (error) {
+                        console.error(chalk.red(`Error rendering parent page (Attempt ${attempt}): ${error.message}`));
+                        if (browser) await browser.close();
+                        if (attempt === MAX_RETRIES) {
+                            console.error(chalk.red(`Max retries reached for parent page: ${url}. Moving on...`));
+                        }
+                        await randomDelay();
+                    }
                 }
 
-                // Save state after each URL is crawled
-                saveState({ cityIndex, bodyType: currentBodyType, page: currentPage });
+                // Here you can call child.js for each childUrl, or scrape directly
+                // For demonstration, just log them
 
-                const memoryUsage = getMemoryUsage();
-                console.log(chalk.blue(`Memory Usage - RSS: ${memoryUsage.rss}, Heap Used: ${memoryUsage.heapUsed}, Heap Total: ${memoryUsage.heapTotal}`));
+                saveState({ cityIndex, bodyType: currentBodyType, page: currentPage });
                 await randomDelay();
             }
             currentPage = 1;
