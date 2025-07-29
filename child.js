@@ -1,12 +1,11 @@
-import puppeteer from 'puppeteer-extra';
-import StealthPlugin from 'puppeteer-extra-plugin-stealth';
-import * as cheerio from 'cheerio';
 import fs from 'fs';
 import path from 'path';
-import { fileURLToPath } from 'url';
 import chalk from 'chalk';
-import { scrapeListing } from './text.js';
 import axios from 'axios';
+import { fileURLToPath } from 'url';
+import puppeteer from 'puppeteer-extra';
+import StealthPlugin from 'puppeteer-extra-plugin-stealth';
+import { scrapeListing } from './text.js';
 
 puppeteer.use(StealthPlugin());
 
@@ -17,7 +16,6 @@ const OUTPUT_DIR = path.resolve(__dirname, 'data');
 const FToken = process.env.FILE_TOKEN;
 const BASE_URL = 'https://www.olx.com.pk';
 
-
 if (!fs.existsSync(OUTPUT_DIR)) fs.mkdirSync(OUTPUT_DIR);
 
 const files = {
@@ -25,10 +23,10 @@ const files = {
 };
 
 const GITHUB_CONFIG = {
-    token: FToken, // GitHub Token
-    repo: 'fawad-ali/olx',   // GitHub repository
-    branch: "main",      // Branch to push changes
-    filePath: "data/data.csv",  // Path in the repository
+    token: FToken,
+    repo: 'fawad-ali/olx',
+    branch: "main",
+    filePath: "data/data.csv",
 };
 
 const visitedUrls = new Set();
@@ -107,59 +105,72 @@ const scrapeChildPages = async (parentUrl) => {
             ],
         });
         const page = await browser.newPage();
+        await page.goto(parentUrl, { waitUntil: 'networkidle2', timeout: 60000 });
 
-        await page.setRequestInterception(true);
-        page.on('request', (req) => {
-            if (['image', 'stylesheet', 'font', 'media'].includes(req.resourceType())) {
-                req.abort();
-            } else {
-                req.continue();
-            }
+        // Get all child URLs from the parent page
+        // NOTE: Update selector below to match OLX's child listing links!
+        const childUrls = await page.evaluate(() => {
+            // Example selector: 'a[data-testid="listing-ad-link"]'
+            // Replace with the correct selector for OLX child pages!
+            return Array.from(document.querySelectorAll('a[data-testid="listing-ad-link"]')).map(a => a.href);
         });
 
-        await page.goto(parentUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
-        await page.waitForSelector("#body-wrapper", { timeout: 30000 });
+        console.log(`Found ${childUrls.length} child pages on ${parentUrl}`);
 
-        await page.evaluate(() => window.scrollBy(0, window.innerHeight));
-        await page.waitForSelector("#body-wrapper li.undefined article > div:last-child > a", { timeout: 30000 });
-
-        const content = await page.content();
-        const $ = cheerio.load(content);
-
-        const listings = [];
-        $("#body-wrapper li.undefined article > div:last-child > a").each((_, el) => {
-            const relativeLink = $(el).attr("href");
-            if (relativeLink && !visitedUrls.has(relativeLink)) {
-                const fullLink = relativeLink.startsWith('http') ? relativeLink : `${BASE_URL}${relativeLink}`;
-                visitedUrls.add(fullLink);
-                listings.push(fullLink);
-            }
+        // Log each child URL for debugging
+        childUrls.forEach((url, idx) => {
+            console.log(`[Child ${idx + 1}] ${url}`);
         });
 
-        console.log(chalk.yellow(`Found ${listings.length} child pages on ${parentUrl}`));
+        // Scrape each child URL
+        for (const childUrl of childUrls) {
+            console.log(`Navigating to child URL: ${childUrl}`); // << Console for each child URL
+            if (visitedUrls.has(childUrl)) {
+                console.log(`Already visited: ${childUrl}`);
+                continue;
+            }
+            visitedUrls.add(childUrl);
 
-        const scrapedData = (await Promise.all(listings.map(scrapeListing))).filter(Boolean);
-        saveToCSV(scrapedData, files.cars);
+            try {
+                // Refresh/load the child page before scraping
+                await page.goto(childUrl, { waitUntil: 'networkidle2', timeout: 60000 });
+                // Optionally, you can refresh again:
+                // await page.reload({ waitUntil: 'networkidle2', timeout: 60000 });
+
+                // Now scrape the child page
+                const pageContent = await page.content();
+
+                // Example: use scrapeListing to parse content (customize as necessary)
+                const scrapedData = scrapeListing(pageContent, childUrl);
+
+                // Save scraped data if available
+                if (scrapedData && scrapedData.length > 0) {
+                    saveToCSV(scrapedData, files.cars);
+                } else {
+                    console.log(chalk.yellow(`No data scraped from ${childUrl}`));
+                }
+            } catch (childErr) {
+                console.error(chalk.red(`Error scraping child URL ${childUrl}: ${childErr.message}`));
+            }
+        }
 
         await browser.close();
 
-        // Upload updated CSV to GitHub
+        // Optionally upload after all scraping
         await uploadToGitHub(files.cars, GITHUB_CONFIG);
 
-        const endTime = Date.now();
-        const responseTime = endTime - startTime;
-
-        console.log(chalk.green(`Response Time: ${responseTime}ms`));
-
-        // Send a success message back to the parent process
-        process.send({ success: true });
+        process.send && process.send({ success: true });
     } catch (error) {
-        console.error(chalk.red(`Error scraping parent page ${parentUrl}: ${error.message}`));
-        process.send({ success: false, message: error.message });
+        console.error(`Error scraping child pages: ${error.message}`);
+        process.send && process.send({ success: false });
     }
 };
 
+// Entry point: get parent URL from process args and run scraper
 const parentUrl = process.argv[2];
-scrapeChildPages(parentUrl).then(() => {
-    console.log(chalk.green("Scraping completed for:", parentUrl));
-});
+if (parentUrl) {
+    scrapeChildPages(parentUrl);
+} else {
+    console.error("No parent URL provided to child.js");
+    process.send && process.send({ success: false });
+}
