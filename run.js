@@ -3,10 +3,6 @@ import { fileURLToPath } from 'url';
 import path from 'path';
 import chalk from 'chalk';
 import fs from 'fs';
-import puppeteer from 'puppeteer-extra';
-import StealthPlugin from 'puppeteer-extra-plugin-stealth';
-
-puppeteer.use(StealthPlugin());
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -89,45 +85,31 @@ const scrapeParentPages = async () => {
                 const url = constructUrl(city, currentBodyType, currentPage);
                 console.log(chalk.yellow(`Crawling URL: ${url}`));
 
-                let childUrls = [];
-                let browser;
+                const child = fork(path.join(__dirname, 'child.js'), [url]);
+
                 try {
-                    browser = await puppeteer.launch({
-                        headless: true,
-                        args: [
-                            '--no-sandbox',
-                            '--disable-setuid-sandbox',
-                            '--disable-blink-features=AutomationControlled',
-                        ],
+                    await new Promise((resolve, reject) => {
+                        child.on('message', (message) => {
+                            if (message && message.success) {
+                                resolve();
+                            } else {
+                                reject(new Error(`Child process failed for ${url}`));
+                            }
+                        });
+
+                        child.on('exit', (code) => {
+                            if (code !== 0) {
+                                console.error(chalk.red(`Child process failed with code ${code}.`));
+                                reject(new Error(`Child process failed with code ${code}`));
+                            }
+                        });
                     });
-                    const page = await browser.newPage();
-                    await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36');
-                    await page.goto(url, { waitUntil: 'networkidle2', timeout: 60000 });
-
-                    // Wait for listings to load
-                    await page.waitForSelector('li[aria-label="Listing"] a', { timeout: 20000 });
-
-                    childUrls = await page.evaluate(() => {
-                        return Array.from(document.querySelectorAll('li[aria-label="Listing"]')).map(li => {
-                            const a = li.querySelector('a');
-                            return a ? (a.href.startsWith("/") ? "https://www.olx.com.pk" + a.href : a.href) : null;
-                        }).filter(Boolean);
-                    });
-
-                    console.log(chalk.yellow(`Found ${childUrls.length} child pages on ${url}`));
-                    childUrls.forEach((childUrl, idx) => {
-                        console.log(`[Child ${idx + 1}] ${childUrl}`);
-                    });
-
-                    await browser.close();
                 } catch (error) {
-                    console.error(chalk.red(`Error rendering parent page: ${error.message}`));
-                    if (browser) await browser.close();
+                    console.error(chalk.red(`Error: ${error.message}`));
                     saveState({ cityIndex, bodyType: currentBodyType, page: currentPage });
+                    // Continue instead of stopping the process
                     continue;
                 }
-
-                // Here you can fork child.js for each childUrl if you want deeper scraping!
 
                 // Save state after each URL is crawled
                 saveState({ cityIndex, bodyType: currentBodyType, page: currentPage });
