@@ -121,7 +121,7 @@ const scrapeChildPages = async (parentUrl) => {
         await page.waitForSelector("#body-wrapper", { timeout: 30000 });
 
         await page.evaluate(() => window.scrollBy(0, window.innerHeight));
-        await page.waitForSelector("#body-wrapper li.undefined article > div:last-child > a", { timeout: 30000 });
+        await page.waitForSelector("#body-wrapper li article > div:last-child > a", { timeout: 30000 });
 
         const content = await page.content();
         const $ = cheerio.load(content);
