@@ -6,21 +6,34 @@ export const scrapeListing = async (url) => {
     try {
         console.log(chalk.cyan(`Scraping URL: ${url}`));
 
-        // Fetch the page content with retries to ensure full load
+        // Fetch the page content with more retries and varying user-agents/cookies
         let data;
         let attempts = 0;
-        const maxAttempts = 3;
+        const maxAttempts = 6;
+        const userAgents = [
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36',
+            'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Safari/605.1.15',
+            'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        ];
         while (attempts < maxAttempts) {
             try {
-                const response = await axios.get(url, { headers: { 'User-Agent': 'Mozilla/5.0' } });
+                const response = await axios.get(url, {
+                    headers: {
+                        'User-Agent': userAgents[attempts % userAgents.length],
+                        'Accept-Language': 'en-US,en;q=0.9',
+                        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+                        'Referer': 'https://www.olx.com.pk/'
+                    },
+                    // Sometimes helps to send cookies as empty string
+                    withCredentials: false
+                });
                 data = response.data;
                 if (data && data.length > 0) break;
             } catch (fetchErr) {
                 console.error(chalk.red(`Attempt ${attempts + 1} failed for ${url}: ${fetchErr.message}`));
             }
             attempts++;
-            // Wait before retrying
-            await new Promise(res => setTimeout(res, 2000));
+            await new Promise(res => setTimeout(res, 1000 + attempts * 500));
         }
 
         if (!data || data.length === 0) {
@@ -30,23 +43,46 @@ export const scrapeListing = async (url) => {
 
         const $ = cheerio.load(data);
 
-        // Wait until the script tag is present by checking multiple selectors and fallback
+        // Try several selectors and logic for the script tag
         let scriptContent = $("#body-wrapper + script").html();
 
-        // If not found, try other likely script tags (useful if markup changes)
+        // If not found, try all scripts containing window.__PRELOADED_STATE__ or window.__REDUX_STATE__, etc.
         if (!scriptContent) {
-            // Try all script tags and see which one contains "window.__PRELOADED_STATE__"
             $('script').each((i, el) => {
                 const html = $(el).html();
-                if (html && html.includes('window.__PRELOADED_STATE__')) {
+                if (html && (
+                    html.includes('window.__PRELOADED_STATE__') ||
+                    html.includes('window.__REDUX_STATE__') ||
+                    html.includes('"phoneNumber":') // fallback: contains phone
+                )) {
                     scriptContent = html;
                 }
             });
         }
 
-        // Additional fallback: try the very last script tag
+        // Fallback: try scripts that contain "phoneNumber" or "contactInfo"
+        if (!scriptContent) {
+            $('script').each((i, el) => {
+                const html = $(el).html();
+                if (html && (html.includes('"phoneNumber":') || html.includes('"contactInfo":'))) {
+                    scriptContent = html;
+                }
+            });
+        }
+
+        // Fallback: try last script tag
         if (!scriptContent) {
             scriptContent = $('script').last().html();
+        }
+
+        // Fallback: try any inline script tag
+        if (!scriptContent) {
+            $('script:not([src])').each((i, el) => {
+                const html = $(el).html();
+                if (html && (html.includes('phoneNumber') || html.includes('contactInfo'))) {
+                    scriptContent = html;
+                }
+            });
         }
 
         if (!scriptContent) {
@@ -64,7 +100,6 @@ export const scrapeListing = async (url) => {
 
         // Skip entries with no phone number
         if (phoneNumber === "N/A") {
-            // console.log(chalk.yellow("Skipping entry with no phone number."));
             return null;
         }
 
@@ -75,7 +110,7 @@ export const scrapeListing = async (url) => {
         // Extract the price and remove commas
         const priceMatch = scriptContent.match(/"formattedValue":"(\d{1,3}(,\d{3})+)"/);
         let price = priceMatch ? priceMatch[1] : "N/A";
-        price = price.replace(/,/g, ""); // Remove commas
+        price = price.replace(/,/g, "");
 
         // Extract the location
         const locationMatch = scriptContent.match(/"location\.lvl2":.*?"name":"(.*?)"/);
@@ -83,22 +118,15 @@ export const scrapeListing = async (url) => {
 
         // Extract the car type from the 'Details' section using Cheerio
         const detailsSection = $('[aria-label="Details"] > div.undefined');
-        let carType = "N/A"; // Default value
-
-        // Find the div containing the "Body Type" and get the next span
+        let carType = "N/A";
         detailsSection.find('div').each((index, div) => {
             const bodyTypeLabel = $(div).find('span').first().text().trim();
             if (bodyTypeLabel === 'Body Type') {
-                // Get the next sibling span (this will be the car type)
                 const nextSpan = $(div).find('span').eq(1).text().trim();
-                carType = nextSpan || "N/A"; // Use "N/A" if the next span is empty
+                carType = nextSpan || "N/A";
             }
         });
 
-        // Log extracted data for debugging
-        // console.log({ title, carType, price, location, name, phoneNumber });
-
-        // Return the extracted data
         return { title, carType, price, location, name, phoneNumber };
     } catch (error) {
         console.error(chalk.red(`Error scraping listing ${url}: ${error.message}`));
