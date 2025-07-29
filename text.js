@@ -1,50 +1,43 @@
-import axios from 'axios';
+import puppeteer from 'puppeteer-extra';
+import StealthPlugin from 'puppeteer-extra-plugin-stealth';
 import * as cheerio from 'cheerio';
 import chalk from 'chalk';
+
+puppeteer.use(StealthPlugin());
 
 export const scrapeListing = async (url) => {
     try {
         console.log(chalk.cyan(`Scraping URL: ${url}`));
 
-        // Fetch the page content with retries to ensure full load
-        let data;
-        let attempts = 0;
-        const maxAttempts = 3;
-        while (attempts < maxAttempts) {
-            try {
-                const response = await axios.get(url, { headers: { 'User-Agent': 'Mozilla/5.0' } });
-                data = response.data;
-                if (data && data.length > 0) break;
-            } catch (fetchErr) {
-                console.error(chalk.red(`Attempt ${attempts + 1} failed for ${url}: ${fetchErr.message}`));
+        // Puppeteer: launch browser & load page
+        const browser = await puppeteer.launch({
+            headless: true,
+            args: [
+                '--no-sandbox',
+                '--disable-setuid-sandbox',
+                '--disable-blink-features=AutomationControlled',
+            ],
+        });
+        const page = await browser.newPage();
+        await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36');
+        await page.goto(url, { waitUntil: 'networkidle2', timeout: 60000 });
+
+        // Get the full HTML after JS runs
+        const html = await page.content();
+        await browser.close();
+
+        const $ = cheerio.load(html);
+
+        // Try to find the correct <script> tag
+        let scriptContent = null;
+        $('script').each((i, el) => {
+            const html = $(el).html();
+            if (html && html.includes('window.__PRELOADED_STATE__')) {
+                scriptContent = html;
             }
-            attempts++;
-            // Wait before retrying
-            await new Promise(res => setTimeout(res, 2000));
-        }
+        });
 
-        if (!data || data.length === 0) {
-            console.error(chalk.red(`Failed to fetch page content after ${maxAttempts} attempts for ${url}`));
-            return null;
-        }
-
-        const $ = cheerio.load(data);
-
-        // Wait until the script tag is present by checking multiple selectors and fallback
-        let scriptContent = $("#body-wrapper + script").html();
-
-        // If not found, try other likely script tags (useful if markup changes)
-        if (!scriptContent) {
-            // Try all script tags and see which one contains "window.__PRELOADED_STATE__"
-            $('script').each((i, el) => {
-                const html = $(el).html();
-                if (html && html.includes('window.__PRELOADED_STATE__')) {
-                    scriptContent = html;
-                }
-            });
-        }
-
-        // Additional fallback: try the very last script tag
+        // Fallback: try last script tag
         if (!scriptContent) {
             scriptContent = $('script').last().html();
         }
@@ -94,9 +87,6 @@ export const scrapeListing = async (url) => {
                 carType = nextSpan || "N/A"; // Use "N/A" if the next span is empty
             }
         });
-
-        // Log extracted data for debugging
-        // console.log({ title, carType, price, location, name, phoneNumber });
 
         // Return the extracted data
         return { title, carType, price, location, name, phoneNumber };
