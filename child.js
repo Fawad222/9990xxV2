@@ -127,7 +127,7 @@ const scrapeChildPages = async (parentUrl) => {
         const $ = cheerio.load(content);
 
         const listings = [];
-        $("#body-wrapper li.undefined article > div:last-child > a").each((_, el) => {
+        $("#body-wrapper li article > div:last-child > a").each((_, el) => {
             const relativeLink = $(el).attr("href");
             if (relativeLink && !visitedUrls.has(relativeLink)) {
                 const fullLink = relativeLink.startsWith('http') ? relativeLink : `${BASE_URL}${relativeLink}`;
