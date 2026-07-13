@@ -7,6 +7,12 @@ import { fileURLToPath } from 'url';
 import chalk from 'chalk';
 import { scrapeListing } from './text.js';
 import axios from 'axios';
+import pLimit from 'p-limit';
+
+// Each listing now makes 2 requests (page HTML + contactInfo API), so keep
+// concurrency modest to avoid tripping OLX's rate limiting / bot detection.
+const LISTING_CONCURRENCY = 4;
+const listingLimit = pLimit(LISTING_CONCURRENCY);
 
 puppeteer.use(StealthPlugin());
 
@@ -121,13 +127,13 @@ const scrapeChildPages = async (parentUrl) => {
         await page.waitForSelector("#body-wrapper", { timeout: 30000 });
 
         await page.evaluate(() => window.scrollBy(0, window.innerHeight));
-        await page.waitForSelector("#body-wrapper li article > div:last-child > a", { timeout: 30000 });
+        await page.waitForSelector("#body-wrapper li.undefined article > div:last-child > a", { timeout: 30000 });
 
         const content = await page.content();
         const $ = cheerio.load(content);
 
         const listings = [];
-        $("#body-wrapper li article > div:last-child > a").each((_, el) => {
+        $("#body-wrapper li.undefined article > div:last-child > a").each((_, el) => {
             const relativeLink = $(el).attr("href");
             if (relativeLink && !visitedUrls.has(relativeLink)) {
                 const fullLink = relativeLink.startsWith('http') ? relativeLink : `${BASE_URL}${relativeLink}`;
@@ -138,7 +144,12 @@ const scrapeChildPages = async (parentUrl) => {
 
         console.log(chalk.yellow(`Found ${listings.length} child pages on ${parentUrl}`));
 
-        const scrapedData = (await Promise.all(listings.map(scrapeListing))).filter(Boolean);
+        const scrapedData = (
+            await Promise.all(listings.map((listingUrl) => listingLimit(() => scrapeListing(listingUrl))))
+        ).filter(Boolean);
+
+        console.log(chalk.blue(`Successfully scraped ${scrapedData.length}/${listings.length} listings (with phone numbers) from ${parentUrl}`));
+
         saveToCSV(scrapedData, files.cars);
 
         await browser.close();
