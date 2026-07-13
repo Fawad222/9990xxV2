@@ -9,10 +9,19 @@ import { scrapeListing } from './text.js';
 import axios from 'axios';
 import pLimit from 'p-limit';
 
-// Each listing now makes 2 requests (page HTML + contactInfo API), so keep
-// concurrency modest to avoid tripping OLX's rate limiting / bot detection.
-const LISTING_CONCURRENCY = 4;
+// Each listing now makes 2 requests (page HTML + contactInfo API). Keep
+// concurrency low and stagger request starts so we never fire a burst of
+// simultaneous requests at OLX — that's what was tripping the 429s.
+const LISTING_CONCURRENCY = 2;
 const listingLimit = pLimit(LISTING_CONCURRENCY);
+
+const randomStagger = () => new Promise((resolve) => setTimeout(resolve, 400 + Math.random() * 600));
+
+const scrapeListingThrottled = (listingUrl) =>
+    listingLimit(async () => {
+        await randomStagger();
+        return scrapeListing(listingUrl);
+    });
 
 puppeteer.use(StealthPlugin());
 
@@ -60,6 +69,11 @@ const saveToCSV = (data, filePath) => {
 };
 
 const uploadToGitHub = async (localFilePath, githubConfig) => {
+    if (!fs.existsSync(localFilePath)) {
+        console.log(chalk.gray(`No local CSV at ${localFilePath} to upload (nothing was scraped this run) — skipping GitHub upload.`));
+        return;
+    }
+
     try {
         const { token, repo, branch, filePath } = githubConfig;
 
@@ -75,7 +89,8 @@ const uploadToGitHub = async (localFilePath, githubConfig) => {
             existingContent = Buffer.from(response.data.content, 'base64').toString('utf-8');
             sha = response.data.sha;
         } catch (err) {
-            if (err.response.status !== 404) {
+            const status = err.response ? err.response.status : null;
+            if (status !== 404) {
                 throw new Error(`Failed to retrieve existing file: ${err.message}`);
             }
         }
@@ -145,7 +160,7 @@ const scrapeChildPages = async (parentUrl) => {
         console.log(chalk.yellow(`Found ${listings.length} child pages on ${parentUrl}`));
 
         const scrapedData = (
-            await Promise.all(listings.map((listingUrl) => listingLimit(() => scrapeListing(listingUrl))))
+            await Promise.all(listings.map((listingUrl) => scrapeListingThrottled(listingUrl)))
         ).filter(Boolean);
 
         console.log(chalk.blue(`Successfully scraped ${scrapedData.length}/${listings.length} listings (with phone numbers) from ${parentUrl}`));

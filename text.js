@@ -8,17 +8,47 @@ const BASE_URL = 'https://www.olx.com.pk';
 // A realistic desktop UA — keep this in sync with a real recent Chrome version.
 const UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36';
 
-// If OLX starts requiring an authenticated session to read phone numbers, drop a
-// fresh cookie string here via env var (grab it from your browser devtools like
-// you just did). Set OLX_COOKIE as a repo secret in GitHub Actions.
+// If OLX starts requiring an authenticated session, drop a fresh cookie string
+// here via env var (grab it from your browser devtools). Set OLX_COOKIE as a
+// repo secret in GitHub Actions. Used on BOTH the page fetch and the API call.
 const OLX_COOKIE = process.env.OLX_COOKIE || '';
 
-// --- Dedicated axios instance for the contactInfo API, with automatic retry/backoff ---
-const contactApiClient = axios.create({ timeout: 15000 });
+// Common "looks like a real browser tab" headers, reused for both the listing
+// page fetch and the contactInfo API call so neither stands out as a bare script.
+const commonHeaders = (extra = {}) => ({
+    'User-Agent': UA,
+    Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+    'Accept-Language': 'en-US,en;q=0.9',
+    'Cache-Control': 'no-cache',
+    Pragma: 'no-cache',
+    ...(OLX_COOKIE ? { Cookie: OLX_COOKIE } : {}),
+    ...extra,
+});
 
-axiosRetry(contactApiClient, {
-    retries: 3,
-    retryDelay: (retryCount) => axiosRetry.exponentialDelay(retryCount, undefined, 1000),
+/**
+ * One shared axios instance, with retry/backoff, used for every request this
+ * module makes (listing page HTML + contactInfo API). Centralizing this means
+ * both request types get the same resilience instead of one being fragile.
+ *
+ * - Retries network errors, timeouts, and 429/500/502/503/504.
+ * - On 429, honors the server's Retry-After header when present instead of
+ *   guessing — this is the single biggest lever against cascading 429s.
+ * - Backs off exponentially (with jitter) otherwise, up to 4 attempts total.
+ */
+const httpClient = axios.create({ timeout: 20000 });
+
+axiosRetry(httpClient, {
+    retries: 4,
+    retryDelay: (retryCount, error) => {
+        const retryAfterHeader = error.response && error.response.headers && error.response.headers['retry-after'];
+        if (retryAfterHeader) {
+            const seconds = Number(retryAfterHeader);
+            if (!Number.isNaN(seconds)) return seconds * 1000;
+        }
+        // Exponential backoff with jitter: 1s, 2s, 4s, 8s (+/- up to 500ms).
+        const base = axiosRetry.exponentialDelay(retryCount, undefined, 1000);
+        return base + Math.floor(Math.random() * 500);
+    },
     retryCondition: (error) => {
         return (
             axiosRetry.isNetworkOrIdempotentRequestError(error) ||
@@ -27,7 +57,8 @@ axiosRetry(contactApiClient, {
         );
     },
     onRetry: (retryCount, error, requestConfig) => {
-        console.log(chalk.yellow(`    ↻ Retry ${retryCount}/3 for ${requestConfig.url} — reason: ${error.message}`));
+        const status = error.response ? error.response.status : error.code || 'NETWORK_ERROR';
+        console.log(chalk.yellow(`    ↻ Retry ${retryCount}/4 for ${requestConfig.url} — reason: ${status}`));
     },
 });
 
@@ -49,21 +80,18 @@ const extractListingId = (url) => {
 const fetchContactInfo = async (listingId, refererUrl) => {
     const apiUrl = `${BASE_URL}/api/listing/${listingId}/contactInfo/`;
 
-    const headers = {
+    const headers = commonHeaders({
         Accept: 'application/json',
         'Accept-Language': 'en',
-        'User-Agent': UA,
         Referer: refererUrl,
         'X-Requested-With': 'XMLHttpRequest',
         'sec-fetch-dest': 'empty',
         'sec-fetch-mode': 'cors',
         'sec-fetch-site': 'same-origin',
-    };
-
-    if (OLX_COOKIE) headers['Cookie'] = OLX_COOKIE;
+    });
 
     try {
-        const { data, status } = await contactApiClient.get(apiUrl, { headers });
+        const { data, status } = await httpClient.get(apiUrl, { headers });
 
         if (!data) {
             console.warn(chalk.yellow(`    ⚠ contactInfo API returned an empty body for listing ${listingId} (status ${status}).`));
@@ -107,17 +135,18 @@ export const scrapeListing = async (url) => {
     try {
         console.log(chalk.cyan(`→ Scraping listing: ${url}`));
 
-        // Fetch the page content
-        const { data } = await axios.get(url, {
-            headers: { 'User-Agent': UA },
-            timeout: 20000,
+        // Fetch the page content — same retrying client + full headers as the
+        // API call, so this request doesn't stand out as a bare script and get
+        // blocked/rate-limited before the retry logic even gets a chance to help.
+        const { data } = await httpClient.get(url, {
+            headers: commonHeaders({ Referer: `${BASE_URL}/` }),
         });
         const $ = cheerio.load(data);
 
         // Select the script tag containing the embedded page data
         const scriptContent = $("#body-wrapper + script").html();
         if (!scriptContent) {
-            console.error(chalk.red(`  ✗ Script tag not found or empty for ${url} — page structure may have changed.`));
+            console.error(chalk.red(`  ✗ Script tag not found or empty for ${url} — page may have been served a block/interstitial page instead of the real listing, or OLX changed the page structure.`));
             return null;
         }
 
@@ -182,7 +211,14 @@ export const scrapeListing = async (url) => {
 
         return { title, carType, price, location, name, phoneNumber };
     } catch (error) {
-        console.error(chalk.red(`  ✗ Error scraping listing ${url}: ${error.message}`));
+        const status = error.response ? error.response.status : null;
+        if (status === 429) {
+            console.error(chalk.red(`  ✗ Listing page rate-limited (429) for ${url} even after 4 retries — request rate is still too high for OLX to tolerate. Lower LISTING_CONCURRENCY in child.js or slow the delay further.`));
+        } else if (status) {
+            console.error(chalk.red(`  ✗ Error scraping listing ${url}: HTTP ${status} — ${error.message}`));
+        } else {
+            console.error(chalk.red(`  ✗ Error scraping listing ${url}: ${error.message}`));
+        }
         return null;
     }
 };
